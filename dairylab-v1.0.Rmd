@@ -1,0 +1,775 @@
+---
+title: "DairyLab"
+author: <a href="https://adatalab.github.io/">@adatalab</a>
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    social: menu
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+# remotes::install_github("adatalab/dairyCattle")
+library(shiny)
+library(flexdashboard)
+library(shinycustomloader)
+library(DT)
+library(dairyCattle)
+library(Hmisc)
+library(waffle)
+library(visreg)
+
+df <- reactive({
+  req(input$selFile$datapath, input$pw == "adatalab")
+  dairyCattle::read_cattle(input$selFile$datapath, add = TRUE, drop.zero = TRUE)
+})
+
+dfn <- reactive({
+  req(input$selFile$datapath, input$pw == "adatalab")
+  dairyCattle::read_cattle(input$selFile$datapath, add = TRUE, drop.zero = FALSE)
+})
+
+```
+
+Dash-board
+=======================================================================
+Column {.sidebar}
+-----------------------------------------------------------------------
+```{r}
+fileInput(
+  "selFile",
+  "검정성적 파일을 업로드해주세요.",
+  multiple = TRUE,
+  buttonLabel = "파일선택"
+)
+# hr()
+passwordInput("pw","Certification", value = "adatalab")
+
+renderText("*DairyLab 애플리케이션의 리뉴얼 작업이 진행될 예정입니다. 문의나 개선제안은 언제나 환영입니다 :) Email: ruminoreticulum@gmail.com")
+```
+
+Row 
+-----------------------------------------------------------------------
+### 착유두수
+```{r}
+renderValueBox({
+  req(input$selFile$datapath)
+  head <- df() %>%
+    nrow() %>%
+    paste0("두")
+  valueBox(head, icon = "glyphicon-signal", color = "#0072B2")
+})
+```
+
+### 일일 유생산량
+```{r}
+renderValueBox({
+  req(input$selFile$datapath)
+  total_my <- df()$유량 %>% sum() %>% paste0("kg")
+  valueBox(total_my, icon = "glyphicon-thumbs-up", color = "#56B4E9")
+})
+```
+
+### 평균 유량
+```{r}
+renderValueBox({
+  req(input$selFile$datapath)
+  my <- df()$유량 %>% mean() %>% round(1) %>% paste0("kg/d")
+  valueBox(my, icon = "glyphicon-tint", color = "#009E73")
+})
+```
+
+
+Row 
+-----------------------------------------------------------------------
+### 평균 비유일수
+```{r}
+renderValueBox({
+  req(input$selFile$datapath)
+  dim <- df()$누적착유일수 %>% mean() %>% round(1) %>% paste0("일")
+  valueBox(dim, icon = "glyphicon-calendar", color = "green")
+})
+```
+
+### 평균 유지방
+```{r}
+renderValueBox({
+  req(input$selFile$datapath)
+  mf <- df()$유지율 %>% mean() %>% round(2) %>% paste0("%")
+  valueBox(mf, icon = "glyphicon-heart", color = "#E8B513")
+})
+```
+
+### 평균 체세포수
+```{r}
+renderValueBox({
+  req(input$selFile$datapath)
+  scc <- df()$체세포수천 %>% mean() %>% round(0)
+  valueBox(scc, icon = "glyphicon-stats", color = "#E05818")
+})
+```
+
+Row 
+-----------------------------------------------------------------------
+### 초산우 비율
+```{r}
+renderGauge({
+  req(input$selFile$datapath)
+  rate <- round(nrow(filter(df(), parity == "First")) / nrow(df()) * 100, 1)
+  gauge(rate,
+    min = 0,
+    max = 100,
+    symbol = "%",
+    sectors = gaugeSectors(colors = "lightblue")
+  )
+})
+```
+
+### 고능력우 비율(유량 > 40 kg)
+```{r}
+renderGauge({
+  req(input$selFile$datapath)
+  rate <- round(nrow(filter(df(), 유량 > 40)) / nrow(df()) * 100, 1)
+  gauge(rate,
+    min = 0,
+    max = 100,
+    symbol = "%",
+    sectors = gaugeSectors(colors = "green")
+  )
+})
+```
+
+### 비유초기 비율(비유일수 < 65일)  
+```{r}
+renderGauge({
+  req(input$selFile$datapath)
+  rate <- round(nrow(filter(df(), level == "early")) / nrow(df()) * 100, 1)
+  gauge(rate,
+    min = 0,
+    max = 100,
+    symbol = "%",
+    sectors = gaugeSectors(colors = "#56B4E9")
+  )
+})
+```
+
+Row {.tabset}
+-----------------------------------------------------------------------
+### Summary     
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(verbatimTextOutput("my"),
+      type = "html",
+      loader = "loader5"
+    )
+  ),
+  server = function(input, output, session) {
+    output$my <- renderPrint({
+      # req(input$selFile$datapath)
+      Hmisc::describe(df())
+    })
+  }
+)
+```
+
+### Parity  
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(plotOutput("my"),
+      type = "html",
+      loader = "loader5"
+    )
+  ),
+  server = function(input, output) {
+    output$my <- renderPlot({
+
+      # req(input$selFile$datapath)
+      parity <- c(`First` = length(which(df()$parity == "First")), `Multiple` = length(which(df()$parity == "Multiple")))
+      waffle(parity, rows = 5, colors = c("#c7d4b6", "#a3aabd"))
+    })
+  }
+)
+```
+
+### Lactation level   
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(plotOutput("my"),
+      type = "html",
+      loader = "loader5"
+    )
+  ),
+  server = function(input, output) {
+    output$my <- renderPlot({
+
+      # req(input$selFile$datapath)
+      level <- c(`Early` = length(which(df()$level == "early")), `Mid` = length(which(df()$level == "mid")), `Late` = length(which(df()$level == "late")))
+      waffle(level, rows = 5, colors = c("#c7d4b6", "#a3aabd", "#a0d0de"))
+    })
+  }
+)
+```
+
+
+
+Data
+=======================================================================
+Column 
+-----------------------------------------------------------------------
+
+### Raw-data  
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(dataTableOutput("table"),
+      type = "html",
+      loader = "loader5"
+    )
+  ),
+  server = function(input, output) {
+    output$table <- renderDataTable({
+
+      # req(input$selFile$datapath)
+      data <- df()
+
+      datatable(
+        data,
+        rownames = FALSE,
+        extensions = "Scroller",
+        # extensions = "Buttons",
+        options = list(
+          autoWidth = TRUE,
+          columnDefs = list(list(width = "100px", targets = "_all", className = "dt-center")),
+          # dom = "Bfrtip",
+          # # buttons = list(list(extend = "colvis")),
+          # buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+          pageLength = 100,
+          lengthMenu = c(10, 25, 50, 100),
+          deferRender = TRUE,
+          # scroller = TRUE,
+          scrollX = TRUE,
+          scrollY = 800
+        )
+      ) %>%
+        formatStyle("산차",
+          background = styleColorBar(c(0, max(df()$산차)), "lightblue"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("누적착유일수",
+          background = styleColorBar(c(0, max(df()$누적착유일수)), "lightblue"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("유량",
+          background = styleColorBar(c(0, max(df()$유량)), "pink"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("유지율",
+          background = styleColorBar(c(0, max(df()$유지율)), "lightblue"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("유단백질",
+          background = styleColorBar(c(0, max(df()$유단백질)), "pink"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("무지고형분율",
+          background = styleColorBar(c(0, max(df()$무지고형분율)), "lightblue"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("체세포수천",
+          background = styleColorBar(range(df()$체세포수천), "pink"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("mun",
+          background = styleColorBar(c(0, max(df()$mun)), "lightblue"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        )
+      # })
+    })
+  }
+)
+```
+
+
+
+Milk yield  
+=======================================================================
+Column {.sidebar}
+-----------------------------------------------------------------------
+```{r}
+
+selectInput(
+  "paritymy",
+  "Parity",
+  choices = c("All", "First", "Multiple")
+)
+
+sliderInput("dimmy", "Days in milk", 0, 500, value = c(0, 305))
+
+# checkboxInput(
+#   "density",
+#   "Density",
+#   value = FALSE
+# )
+
+hr()
+
+my <- reactive({
+  mindimmy <- input$dimmy[1]
+  maxdimmy <- input$dimmy[2]
+
+  m <- df() %>%
+    filter(누적착유일수 >= mindimmy, 누적착유일수 <= maxdimmy)
+
+  if (input$paritymy != "All") {
+    m %>%
+      filter(parity == input$paritymy)
+  } else {
+    m
+  }
+})
+```
+
+Row
+-----------------------------------------------------------------------
+### 비유곡선(전체) {data-height=700}
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(plotOutput("my", brush = "brushed_area"),
+      type = "html",
+      loader = "loader5"
+    ),
+    withLoader(tableOutput("event_info"))
+  ),
+  server = function(input, output) {
+    output$my <- renderPlot({
+
+      # req(input$selFile$datapath)
+      dairyCattle::dim_my(my(), line = TRUE, density = TRUE, grid = FALSE)
+    })
+    
+    output$event_info <- renderTable({
+  brushedPoints(my()[c("단축명호","산차","parity","누적착유일수","유량","유지율","유단백질","무지고형분율","체세포수천","mun")], input$brushed_area, xvar = "누적착유일수", y = "유량")
+})
+    
+  }
+)
+```
+
+Row
+-----------------------------------------------------------------------
+### Model {data-height=300}
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(verbatimTextOutput("my"),
+      type = "html",
+      loader = "loader5"
+    )
+  ),
+  server = function(input, output) {
+    output$my <- renderPrint({
+
+      # req(input$selFile$datapath)
+      mymodel <- lm(유량 ~ 누적착유일수 + I(누적착유일수^2), my())
+      list(
+        peak = -mymodel$coefficients[2] / (mymodel$coefficients[3] * 2),
+        max = max(mymodel$fitted.value),
+        min = min(mymodel$fitted.value),
+        summary = summary(mymodel)
+      )
+    })
+  }
+)
+```
+
+
+
+
+
+MUN-MP
+=======================================================================
+Column {.sidebar}
+-----------------------------------------------------------------------
+```{r}
+
+selectInput(
+  "paritymun",
+  "Parity",
+  choices = c("All", "First", "Multiple")
+)
+
+sliderInput("dimmun", "Days in milk", 0, 500, value = c(0, 305))
+
+hr()
+
+munmp <- reactive({
+  mindimmun <- input$dimmun[1]
+  maxdimmun <- input$dimmun[2]
+
+  m <- df() %>%
+    filter(누적착유일수 >= mindimmun, 누적착유일수 <= maxdimmun)
+
+  if (input$paritymun != "All") {
+    m %>%
+      filter(parity == input$paritymun)
+  } else {
+    m
+  }
+})
+
+```
+
+
+Column
+-----------------------------------------------------------------------
+
+### MUN-MP (Reactive) {data-height=700}  
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(plotOutput("my", brush = "brushed_area"),
+      type = "html",
+      loader = "loader5"
+    ),
+    withLoader(tableOutput("event_info"))
+  ),
+  server = function(input, output) {
+    output$my <- renderPlot({
+
+      # req(input$selFile$datapath)
+      mun_mp(munmp(), line = TRUE, grid = FALSE, density = TRUE)
+    },
+    height = 400,
+    width = 500
+    )
+    
+    output$event_info <- renderTable({
+  brushedPoints(munmp()[c("단축명호","산차","parity","누적착유일수","유량","유지율","유단백질","무지고형분율","체세포수천","mun")], input$brushed_area, xvar = "mun", y = "유단백질")
+})
+  }
+)
+```
+
+Column {data-height=300}
+-----------------------------------------------------------------------
+### 분류 
+```{r}
+renderPrint({
+  req(input$selFile$datapath)
+  mun_mp_tbl(munmp())
+})
+```
+
+
+
+MF-MP
+=======================================================================
+Column
+-----------------------------------------------------------------------
+
+### 유지방-유단백질 분석(전체)  
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(plotOutput("my"),
+      type = "html",
+      loader = "loader5"
+    )
+  ),
+  server = function(input, output) {
+    output$my <- renderPlot({
+
+      # req(input$selFile$datapath)
+      fat_prot(df(), line = TRUE, grid = FALSE, density = TRUE)
+    },
+    height = 400,
+    width = 500
+    )
+  }
+)
+```
+
+### 유지방-유단백질 분석(산차별)  
+```{r}
+shinyApp(
+  ui = fluidPage(
+    withLoader(plotOutput("my"),
+      type = "html",
+      loader = "loader5"
+    )
+  ),
+  server = function(input, output) {
+    output$my <- renderPlot({
+
+      # req(input$selFile$datapath)
+      fat_prot(df(), line = TRUE, grid = TRUE, density = TRUE)
+    },
+    height = 400,
+    width = 500
+    )
+  }
+)
+```
+
+Column
+-----------------------------------------------------------------------
+### Model   
+```{r}
+renderPrint({
+  req(input$selFile$datapath)
+  lm(유지율 ~ 유단백질, df()) %>% summary()
+})
+```
+
+
+
+
+Calving
+=======================================================================
+Column {.tabset}
+-----------------------------------------------------------------------
+### 분만스케쥴 
+#### 스케쥴 {data-height=700}
+```{r}
+timevis::renderTimevis({
+  req(input$selFile$datapath)
+  parturition(dfn())
+})
+```
+
+#### 월별 분만두수 {data-height=300}
+```{r}
+renderPrint({
+  req(input$selFile$datapath)
+  dfn <- dfn()
+  dfn$year_calving <- dfn$분만예정일 %>% lubridate::year()
+  dfn$month_calving <- dfn$분만예정일 %>% lubridate::month() %>% factor(levels = c(1:12))
+  table(dfn$year_calving, dfn$month_calving)
+})
+```
+
+### 상세
+```{r}
+shinyApp(
+  ui = fluidPage(
+    dataTableOutput("calving")
+  ),
+  server = function(input, output) {
+    output$calving <- renderDataTable({
+      # req(input$selFile$datapath)
+      calving1 <- dfn()[c("명호", "단축명호", "최종수정일자", "분만예정일", "산차", "누적착유일수", "유량")] %>%
+        filter(is.na(분만예정일) == FALSE)
+      datatable(
+        calving1,
+        rownames = FALSE,
+        extensions = "Scroller",
+        # extensions = "Buttons",
+        options = list(
+          autoWidth = TRUE,
+          columnDefs = list(list(width = "100px", targets = "_all", className = "dt-center")),
+          # dom = "Bfrtip",
+          # # buttons = list(list(extend = "colvis")),
+          # buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+          pageLength = 100,
+          lengthMenu = c(10, 25, 50, 100),
+          deferRender = TRUE,
+          # scroller = TRUE,
+          scrollX = TRUE,
+          scrollY = 800
+        )
+      ) %>%
+        formatStyle("유량",
+          background = styleColorBar(range(df()$유량), "pink"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("산차",
+          background = styleColorBar(range(df()$산차), "lightblue"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        ) %>%
+        formatStyle("누적착유일수",
+          background = styleColorBar(range(df()$누적착유일수), "lightblue"),
+          backgroundSize = "98% 88%",
+          backgroundRepeat = "no-repeat",
+          backgroundPosition = "center"
+        )
+    })
+  }
+)
+```
+
+### 건유
+#### 스케쥴 {data-height=600}
+```{r}
+timevis::renderTimevis({
+  req(input$selFile$datapath)
+  df1 <- dfn()
+  df1$분만예정일 <- df1$분만예정일 - 60
+  df1 <- filter(df1, is.na(유량) == FALSE)
+  parturition(df1)
+})
+```
+
+#### 월별 건유두수 {data-height=200}
+```{r}
+renderPrint({
+  req(input$selFile$datapath)
+  df <- df()
+  df$year_dry <- (df$분만예정일 - 60) %>% lubridate::year()
+  df$month_dry <- (df$분만예정일 - 60) %>% lubridate::month() %>% factor(levels = c(1:12))
+  table(df$year_dry, df$month_dry)
+})
+```
+
+#### 분만-건유 {data-height=200}
+```{r}
+renderPrint({
+  req(input$selFile$datapath)
+  df <- df()
+  dfn <- dfn()
+  dfn$year_calving <- dfn$분만예정일 %>% lubridate::year()
+  dfn$month_calving <- dfn$분만예정일 %>% lubridate::month() %>% factor(levels = c(1:12))
+  df$year_dry <- (df$분만예정일 - 60) %>% lubridate::year()
+  df$month_dry <- (df$분만예정일 - 60) %>% lubridate::month() %>% factor(levels = c(1:12))
+  table(dfn$year_calving, dfn$month_calving) - table(df$year_dry, df$month_dry)
+})
+```
+
+
+Modeling {data-orientation=rows}
+=======================================================================
+Column {.sidebar}
+-----------------------------------------------------------------------
+```{r}
+textInput(
+  "parity",
+  "Parity",
+  value = 1
+)
+
+sliderInput(
+  "dim",
+  "Days in milk",
+  min = 0,
+  max = 500,
+  value = 150
+)
+
+actionButton(
+  "start",
+  "Predict it!"
+)
+```
+
+Row {data-height=200}
+-----------------------------------------------------------------------
+### Prediction  
+```{r}
+renderPrint({
+  req(input$start)
+  input$start
+  isolate({
+    dataframe <- data.frame(누적착유일수 = as.numeric(input$dim), 산차 = as.numeric(input$parity))
+    predict(model, dataframe)
+  })
+})
+```
+
+Row {data-height=400}
+-----------------------------------------------------------------------
+### Model  
+Prediction model for milk yield.  
+```{r}
+renderPrint({
+  req(input$selFile$datapath)
+  model <<- lm(유량 ~ 누적착유일수 + I(누적착유일수^2) + 산차 + I(산차^2) + 누적착유일수:산차, df())
+  return(summary(model))
+})
+```
+
+Row {data-height=400}
+-----------------------------------------------------------------------
+### Plot
+```{r}
+renderPlot({
+  req(input$selFile$datapath)
+  input$start
+  isolate({
+    visreg2d(model, "누적착유일수", "산차", plot.type = "image") %>% plot(xlab = "Days in milk", ylab = "Parity", zlab = "Milk yield")
+  })
+})
+```
+
+
+
+Tutoral
+=======================================================================
+Column {.tabset}
+-----------------------------------------------------------------------
+### Tutorial
+<iframe width="960" height="540" src="https://www.youtube.com/embed/Mx7Svg8_9zI" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+자막 기능을 실행해주세요.  
+last update: 11/14/2018  
+
+
+
+
+About  
+=======================================================================
+Row {data-height=200}
+-----------------------------------------------------------------------
+### Info.  
+검정성적 다운로드: [농협경제지주 젖소개량사업소](http://www.dcic.co.kr/performace_02.do)  
+
+Row {data-height=800}
+-----------------------------------------------------------------------
+### Project adatalab  
+<a href="https://adatalab.github.io/"><img src="https://github.com/adatalab/logo/blob/master/logo.png?raw=true" width=100 height=100></a>  
+*"animal science with data science. animal datalab."*  
+
+Github: https://github.com/adatalab  
+문의 & 개선제안: ruminoreticulum@gmail.com  
+
+**Packages**  
+- [dairyCattle](https://github.com/adatalab/dairyCattle) for modeling the nutrient requirement of dairy cattle.   
+- [CH4goat](https://github.com/adatalab/CH4goat) for a deep learning models to calculate the methane emission from goats.   
+- [feed](https://github.com/adatalab/feed) for animal feed information.     
+- [hanwoo](https://github.com/adatalab/hanwoo) for modeling the nutrient requirement of Hanwoo cattle.   
+
+**Project**  
+- [Geographic information system (GIS) anlaysis for animal manure treatment in Korea](https://github.com/YoungjunNa/GIS-livestock-manure.git), 2018  
+- [Breeding bull analysis for Hanwoo, KPN: Here in the real world 2017](https://youngjunna.github.io/adatalab/kpn-2017-sample.html), 2018  
+- [Pedigree visualization for Hanwoo](https://youngjunna.github.io/2018/04/10/kpn-network-full/), 2018  
+- [Animal nutrition journal report](https://youngjunna.github.io/2018/07/04/animal-nutrition-journal-report/), 2017 - present    
+
+<img src="https://avatars0.githubusercontent.com/u/28377612?s=400&u=0260975d694571aa7e43a17adb5c95a4a9835ae2&v=4" width=100 height=100>  
+**Youngjun Na, PhD**   
+Department of Animal Science and Technology, Konkuk University  
+120 Neungdong-ro, Gwangjin-gu, Seoul 05029, Republic of Korea  
+Github: https://github.com/YoungjunNa  
+Email: ruminoreticulum@gmail.com  
